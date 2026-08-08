@@ -1,0 +1,21 @@
+# 编译产物
+bin/
+obj/
+
+# Visual Studio / Rider / VSCode
+.vs/
+.idea/
+.vscode/
+
+# 用户专属文件
+*.user
+*.suo
+*.userprefs
+
+# 日志与配置缓存（运行时生成）
+*.log
+*.config.json
+
+# 调试输出
+Release2/
+Release3/
