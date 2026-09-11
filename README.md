@@ -1,6 +1,7 @@
 # ATK-XCM-Host
 
 正点原子（ALIENTEK）ATK-XCM USB 副屏的 Windows 上位机，自实现版本。
+配套 RLCD 设备端固件见 [RLCD-XCM-Firmware](https://github.com/Newchana/RLCD-XCM-Firmware)。
 
 把电脑的 CPU/GPU/内存/网络状态实时推送到 ATK-XCM 副屏（基于 ESP32-S3 的 USB-CDC 串口屏）上显示。
 后台服务 + 托盘，无主窗口。与原版串口协议**字节级兼容**，设备端固件无需改动。
