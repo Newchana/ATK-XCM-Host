@@ -30,6 +30,7 @@ public enum DiscoveryState
 public sealed class AutoDiscovery
 {
     private readonly SerialLink _link;
+    private readonly BleLink? _ble;
     private Thread? _thread;
     private DiscoveryState _state = DiscoveryState.Idle;
 
@@ -52,9 +53,10 @@ public sealed class AutoDiscovery
     /// <summary>上一次成功连接的端口名，下次搜索时优先尝试。</summary>
     public string? LastPort { get; set; }
 
-    public AutoDiscovery(SerialLink link)
+    public AutoDiscovery(SerialLink link, BleLink? ble = null)
     {
         _link = link;
+        _ble = ble;
     }
 
     /// <summary>启动搜索线程（若已运行则忽略）。</summary>
@@ -136,7 +138,25 @@ public sealed class AutoDiscovery
                 }
             }
 
-            // 一轮没找到：短暂等待后继续重试（不退出线程，保证持续重连）
+            // 一轮串口没找到：试试蓝牙 NUS（仅当开关打开；老设备不受影响）
+            if (_ble != null && SerialLink.IncludeBluetooth && State != DiscoveryState.StopRequested)
+            {
+                Log("trying BLE RLCD-XCM ...");
+                bool bleOk = false;
+                try { bleOk = _ble.TryHandshake(); }
+                catch (Exception ex) { Log("  BLE error: " + ex.Message); }
+                Log($"  handshake BLE -> {(bleOk ? "OK" : "no")} {(_ble.LastError != "" ? "(" + _ble.LastError + ")" : "")}");
+                if (bleOk)
+                {
+                    LastPort = BleLink.PortId;
+                    State = DiscoveryState.Connected;
+                    Log($"CONNECTED on {BleLink.PortId}");
+                    ConnectionChanged?.Invoke(BleLink.PortId);
+                    return;
+                }
+            }
+
+            // 都没找到：短暂等待后继续重试（不退出线程，保证持续重连）
             State = DiscoveryState.Pending;
             ConnectionChanged?.Invoke(null);
             for (int i = 0; i < 30 && State == DiscoveryState.Pending; i++)
@@ -145,25 +165,5 @@ public sealed class AutoDiscovery
         Log("SearchLoop exit");
     }
 
-    private static void Log(string msg)
-    {
-        try
-        {
-            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ATK_XCM");
-            System.IO.Directory.CreateDirectory(dir);
-            System.IO.File.AppendAllText(
-                System.IO.Path.Combine(dir, "XcmHost.log"),
-                $"[{DateTime.Now:HH:mm:ss.fff}] [Discovery] {msg}{Environment.NewLine}");
-        }
-        catch { /* ignore */ }
-    }
-
-    private static string[] MoveToFront(string[] arr, string target)
-    {
-        if (arr.Length == 0) return arr;
-        var list = new List<string>(arr);
-        if (list.Remove(target))
-            list.Insert(0, target);
-        return list.ToArray();
-    }
+    private static void Log(string msg) => LogHelper.Write("Discovery", msg);
 }

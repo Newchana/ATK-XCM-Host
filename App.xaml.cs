@@ -19,6 +19,7 @@ public partial class App : Application
     private Config _config = null!;
     private HardwareMonitor _monitor = null!;
     private SerialLink _link = null!;
+    private BleLink _ble = null!;
     private AutoDiscovery _discovery = null!;
     private PollingLoop _loop = null!;
     private ManagementEventWatcher? _deviceWatcher;
@@ -75,7 +76,11 @@ public partial class App : Application
 
         _monitor = new HardwareMonitor();
         _link = new SerialLink();
-        _discovery = new AutoDiscovery(_link);
+        _ble = new BleLink();
+        _ble.DebugLog += msg => Log("[BLE] " + msg);
+        BleLink.Verbose = _config.BleDebug;
+        SerialLink.IncludeBluetooth = _config.IncludeBluetooth;
+        _discovery = new AutoDiscovery(_link, _ble);
         _loop = new PollingLoop(_link, _monitor, _config);
 
         // 把默认显卡/网卡注入监控
@@ -110,22 +115,16 @@ public partial class App : Application
     private void OnConnectionChanged(string? port)
     {
         _connectedPort = port ?? "";
+        // 按连接标识切换底层链路（串口 / 蓝牙 NUS）
+        if (!string.IsNullOrEmpty(port) && port.StartsWith("BLE:", StringComparison.Ordinal))
+            _loop.SetLink(_ble);
+        else if (!string.IsNullOrEmpty(port))
+            _loop.SetLink(_link);
         UpdateTrayText();
     }
 
     /// <summary>把一行日志写到 %TEMP%/ATK_XCM/XcmHost.log，便于排查。</summary>
-    private static void Log(string message)
-    {
-        try
-        {
-            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ATK_XCM");
-            System.IO.Directory.CreateDirectory(dir);
-            System.IO.File.AppendAllText(
-                System.IO.Path.Combine(dir, "XcmHost.log"),
-                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
-        }
-        catch { /* 忽略日志写入失败 */ }
-    }
+    private static void Log(string message) => LogHelper.Write("App", message);
 
     private void OnDiscoveryStateChanged(DiscoveryState state)
     {
@@ -223,6 +222,69 @@ public partial class App : Application
         };
         menu.Items.Add(autoStart);
 
+        // RLCD 扩展功能（默认全关 = 与原版行为一致，老设备零影响）
+        var ext = new System.Windows.Controls.MenuItem { Header = "RLCD 扩展功能" };
+        var mTime = new System.Windows.Controls.MenuItem { Header = "推送时钟同步 (!T)", IsCheckable = true, IsChecked = _config.ExtendedFrames };
+        mTime.Click += (_, _) =>
+        {
+            _config.ExtendedFrames = mTime.IsChecked;
+            _config.Save();
+        };
+        var mBle = new System.Windows.Controls.MenuItem { Header = "搜索蓝牙设备 (BLE)", IsCheckable = true, IsChecked = _config.IncludeBluetooth };
+        mBle.Click += (_, _) =>
+        {
+            _config.IncludeBluetooth = mBle.IsChecked;
+            SerialLink.IncludeBluetooth = mBle.IsChecked;
+            _config.Save();
+            _discovery.Restart(); // 立刻按新规则重搜
+        };
+        ext.Items.Add(mTime);
+        ext.Items.Add(mBle);
+        menu.Items.Add(ext);
+
+        // 诊断（链路状态查询、BLE 握手测试、详细日志开关）
+        var bleDbg = new System.Windows.Controls.MenuItem { Header = "诊断" };
+        var bleTest = new System.Windows.Controls.MenuItem { Header = "测试BLE握手" };
+        bleTest.Click += (_, _) =>
+        {
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                // 用独立实例测试，不掐断当前正在用的链路
+                using var probe = new BleLink();
+                probe.DebugLog += msg => Log("[BLE] " + msg);
+                Log("[BLE] manual handshake test start");
+                bool ok;
+                try { ok = probe.TryHandshake(); }
+                catch (Exception ex) { Log("[BLE] manual test exception: " + ex); ok = false; }
+                string msg = ok ? "BLE 握手成功！" : "BLE 握手失败：" + probe.LastError;
+                Log("[BLE] manual test result: " + msg);
+                Dispatcher.BeginInvoke(new System.Action(() =>
+                    MessageBox.Show(msg + "\n\n详情见日志：%TEMP%\\ATK_XCM\\XcmHost.log",
+                        "BLE 诊断", MessageBoxButton.OK,
+                        ok ? MessageBoxImage.Information : MessageBoxImage.Warning)));
+            });
+        };
+        var bleState = new System.Windows.Controls.MenuItem { Header = "当前链路状态" };
+        bleState.Click += (_, _) =>
+        {
+            string msg = $"串口: IsOpen={_link.IsOpen} Port={_link.PortName ?? "null"}\n" +
+                         $"蓝牙: IsOpen={_ble.IsOpen} Port={_ble.PortName ?? "null"}\n" +
+                         $"BLE最近错误: {_ble.LastError}\n" +
+                         $"轮询链路: {_loop.ActiveLinkName}";
+            MessageBox.Show(msg, "链路状态", MessageBoxButton.OK, MessageBoxImage.Information);
+        };
+        bleDbg.Items.Add(bleTest);
+        bleDbg.Items.Add(bleState);
+        var bleVerbose = new System.Windows.Controls.MenuItem { Header = "BLE详细日志", IsCheckable = true, IsChecked = _config.BleDebug };
+        bleVerbose.Click += (_, _) =>
+        {
+            _config.BleDebug = bleVerbose.IsChecked;
+            BleLink.Verbose = bleVerbose.IsChecked;
+            _config.Save();
+        };
+        bleDbg.Items.Add(bleVerbose);
+        menu.Items.Add(bleDbg);
+
         // 重新搜索
         var research = new System.Windows.Controls.MenuItem { Header = "重新搜索设备" };
         research.Click += (_, _) => _discovery.Restart();
@@ -273,7 +335,7 @@ public partial class App : Application
         string state = _discovery.State.ToString();
         string interval = _config.RefreshIntervalMs <= 0 ? "已停止发送" : $"{_config.RefreshIntervalMs} ms";
         MessageBox.Show(
-            $"连接端口：{port}\n搜索状态：{state}\n刷新间隔：{interval}\n显卡：{_config.GpuName}\n网卡：{_config.NetworkName}",
+            $"连接端口：{port}\n搜索状态：{state}\n刷新间隔：{interval}\n显卡：{_config.GpuName}\n网卡：{_config.NetworkName}\n时钟同步：{(_config.ExtendedFrames ? "开" : "关")}\n蓝牙搜索：{(_config.IncludeBluetooth ? "开" : "关")}",
             "XcmHost 状态", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
@@ -301,8 +363,9 @@ public partial class App : Application
                 td.Settings.DisallowStartIfOnBatteries = false;
                 td.Settings.ExecutionTimeLimit = TimeSpan.Zero;
 
-                string exe = Process.GetCurrentProcess().MainModule?.FileName
-                             ?? Assembly.GetExecutingAssembly().Location;
+                string exe = System.Environment.ProcessPath
+                             ?? Process.GetCurrentProcess().MainModule?.FileName
+                             ?? System.IO.Path.Combine(System.AppContext.BaseDirectory, "XcmHost.exe");
                 var action = new ExecAction(exe);
                 td.Actions.Add(action);
                 ts.RootFolder.RegisterTaskDefinition(TaskName, td);
@@ -327,6 +390,7 @@ public partial class App : Application
         _loop?.Dispose();
         _discovery?.Stop();
         _link?.Dispose();
+        _ble?.Dispose();
         _monitor?.Dispose();
         _tray?.Dispose();
         base.OnExit(e);

@@ -16,6 +16,15 @@ public sealed class Config
     public string ComName { get; set; } = "";
     /// <summary>开机自启动。</summary>
     public bool AutoStart { get; set; } = true;
+    /// <summary>
+    /// 发送 RLCD 扩展帧（如 !T 时钟同步）。默认 false = 只发 $ 帧，与原版逐字节一致，
+    /// 老 ATK 副屏即使收到 ! 行也会忽略。
+    /// </summary>
+    public bool ExtendedFrames { get; set; } = false;
+    /// <summary>自动搜索时是否包含蓝牙串口 / BLE 设备。默认 false。</summary>
+    public bool IncludeBluetooth { get; set; } = false;
+    /// <summary>BLE 详细调试日志（每帧读写都记）。默认 false = 只记错误。</summary>
+    public bool BleDebug { get; set; } = false;
 
     private static readonly string Dir = Path.Combine(Path.GetTempPath(), "ATK_XCM");
     private static readonly string Path_ = System.IO.Path.Combine(Dir, "XcmHost.config.json");

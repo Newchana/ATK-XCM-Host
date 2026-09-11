@@ -1,6 +1,8 @@
 # 编译产物
 bin/
 obj/
+# 单文件发布产物（183MB，CI/本地生成，不入库）
+publish/
 
 # Visual Studio / Rider / VSCode
 .vs/

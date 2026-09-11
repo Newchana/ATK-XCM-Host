@@ -8,7 +8,7 @@ namespace XcmHost.Comm;
 /// 串口链路管理。参数与原版完全一致：115200 / 8N1 / None。
 /// 提供：枚举端口、尝试打开握手、写数据帧、关闭、状态查询。
 /// </summary>
-public sealed class SerialLink : IDisposable
+public sealed class SerialLink : ILink, IDisposable
 {
     /// <summary>波特率，与原版 ATK_XCM 一致。</summary>
     public const int BaudRate = 115200;
@@ -83,8 +83,14 @@ public sealed class SerialLink : IDisposable
     }
 
     /// <summary>
+    /// 是否把蓝牙串口也纳入搜索。默认 false（蓝牙口打开慢，且原版 ATK 副屏是 USB 的）。
+    /// 由托盘开关控制，存在 Config.IncludeBluetooth。
+    /// </summary>
+    public static bool IncludeBluetooth { get; set; } = false;
+
+    /// <summary>
     /// 判断端口是否值得尝试握手。蓝牙串口（BTHENUM / 蓝牙链接）打开会长时间卡顿，
-    /// 且不可能是 ATK-XCM 副屏，直接跳过以加快搜索、避免超时。
+    /// 默认跳过；仅当 <see cref="IncludeBluetooth"/> 为 true 时才尝试。
     /// </summary>
     public static bool IsLikelyUsable(string description)
     {
@@ -92,7 +98,7 @@ public sealed class SerialLink : IDisposable
             return true; // 没描述就尝试
         string d = description.ToUpperInvariant();
         if (d.Contains("BTHENUM") || d.Contains("蓝牙") || d.Contains("BLUETOOTH"))
-            return false;
+            return IncludeBluetooth;
         return true;
     }
 
@@ -102,8 +108,10 @@ public sealed class SerialLink : IDisposable
     /// </summary>
     /// <param name="portName">端口名</param>
     /// <param name="waitMs">等待响应最长毫秒，默认 1000（原版约 20×50ms）。</param>
-    public bool TryHandshake(string portName, int waitMs = 1000)
+    public bool TryHandshake(string? portName, int waitMs = 1000)
     {
+        if (string.IsNullOrEmpty(portName))
+            return false;
         // 如已打开但不是目标端口，先关
         if (_port.IsOpen && _port.PortName != portName)
             Close();

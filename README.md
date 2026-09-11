@@ -79,10 +79,32 @@ dotnet run -c Release   # 调试
 
 启动后无主窗口，右下角托盘出现图标，自动搜索副屏 COM 口并握手连接。
 
+### 单文件发布版（推荐，不装 .NET 也能跑）
+
+```bash
+dotnet publish -c Release -r win-x64 --self-contained true \
+  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+  -o publish/win-x64
+```
+
+产物为单个约 183MB 的 `XcmHost.exe`（已内含 .NET 8 运行时 + WinRT 蓝牙组件），
+拷到任意 Win10 1809+ / Win11 机器双击即用。运行时仍需**管理员权限**（传感器原因）。
+
+## v1.1 新增（RLCD 副屏 / 蓝牙）
+
+- **RLCD 扩展帧**（托盘 `RLCD 扩展功能` → `推送时钟同步`）：每 30 秒追加 `!T:yyyy,MM,dd,HH,mm,ss*CS` 对时行。
+  默认**关闭**，关闭时与 v1.0 逐字节一致；`!` 行会被老 ATK 副屏忽略，老机器零影响。
+- **蓝牙 NUS 链路**（托盘 `RLCD 扩展功能` → `搜索蓝牙设备`）：自动搜索改走蓝牙（Nordic UART Service）
+  连接名为 `RLCD-XCM` 的设备，无需系统配对。与串口同一套握手/数据帧，断线自动回落重搜。
+- **诊断菜单**（托盘 `诊断`）：`测试BLE握手`、`当前链路状态`、`BLE详细日志`开关。
+  日常运行时默认安静（只记错误），开详细日志后才记录每帧读写。
+- **日志轮转**：`XcmHost.log` 超 2MB 自动备份为 `.1` 后重建，托盘常驻不再撑爆磁盘。
+
 ## 日志与配置
 
 - 运行日志：`%TEMP%\ATK_XCM\XcmHost.log`（连接、握手、发送的数据帧）
-- 配置文件：`%TEMP%\ATK_XCM\XcmHost.config.json`（刷新间隔、默认网卡/显卡、开机自启）
+- 配置文件：`%TEMP%\ATK_XCM\XcmHost.config.json`
+  （刷新间隔、默认网卡/显卡、开机自启、ExtendedFrames、IncludeBluetooth、BleDebug）
 
 ## 依赖
 
